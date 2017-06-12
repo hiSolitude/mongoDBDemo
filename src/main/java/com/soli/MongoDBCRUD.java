@@ -5,12 +5,15 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Filters;
+import static com.mongodb.client.model.Filters.*;
+import static com.mongodb.client.model.Sorts.*;
+
+import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.Test;
 
-import java.net.UnknownHostException;
+import javax.print.Doc;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,74 +21,29 @@ import java.util.List;
  * Created by Solitude on 2017/6/9.
  *
  * 连接本机数据库
+ *
+ *MongoClient实例实际上代表与数据库的连接池;
+ * MongoClient即使使用多个线程，只需要一个类的实例 。
+ *  通常，您只MongoClient为给定的数据库集群创建一个实例，并在整个应用程序中使用它。创建多个实例时：
+    1、所有资源使用限制（最大连接等）适用于每个 MongoClient实例
+    2、要处理实例，请确保调用MongoClient.close() 清理资源
  */
 public class MongoDBCRUD {
-    //测试本地数据库连接
-    @Test
-    public void JDBCTest(){
-        try {
-            //连接mongodb服务
-            MongoClient mongoClient = new MongoClient("localhost",27017);
 
-            // 连接到数据库
-            DB db = mongoClient.getDB("foobar");
-            System.out.println("Connect to database successfully!");
+    //连接mongodb服务
+    MongoClient mongoClient = new MongoClient("localhost",27017);
 
-        }catch (Exception e){
-            System.out.println(e.getMessage());
-        }
-    }
-
-    //创建集合
-    //创建集合需要使用 MongoDatabase 类的 createCollection() 方法。
-    @Test
-    public void createCol(){
-        try {
-            //连接mongodb服务
-            MongoClient mongoClient = new MongoClient("localhost",27017);
-
-            // 连接到数据库
-            MongoDatabase db = mongoClient.getDatabase("foobar");
-            System.out.println("Connect to database successfully!");
-
-            //创建Collection
-            db.createCollection("myCollection");
-            System.out.println("Collection created successfully");
-
-            //删除Collection
-//            db.getCollection("myCollection").drop();
-
-        }catch (Exception e){
-            System.out.println(e.getMessage());
-        }
-    }
+    // 连接到数据库
+    MongoDatabase db = mongoClient.getDatabase("foobar");
 
     //获取/选择一个集合
-    //MongoDatabase 中 getCollection方法
-    @Test
-    public void TestChooseCol(){
-        MongoClient mongoClient = new MongoClient("localhost",27017);
+    MongoCollection<Document> col = db.getCollection("myCollection");
 
-        MongoDatabase db = mongoClient.getDatabase("foobar");
-
-        MongoCollection<Document> col =  db.getCollection("myCollection");
-
-        MongoNamespace name = col.getNamespace();
-
-        String dbname = name.getDatabaseName();
-
-        System.out.println(dbname);
-    }
 
     //插入文档
     //MongoCollection  中  insert() 方法
     @Test
     public void TestInsert(){
-        MongoClient mongoClient = new MongoClient("localhost",27017);
-
-        MongoDatabase db = mongoClient.getDatabase("foobar");
-
-        MongoCollection<Document>  col = db.getCollection("myCollection");
         //插入文档
         /**
          * 1. 创建文档 org.bson.Document 参数为key-value的格式
@@ -106,13 +64,31 @@ public class MongoDBCRUD {
         System.out.println("文档2插入成功");
     }
 
+
+    //插入多个文档
+    //MongoCollection  中  insertMany() 方法
+    @Test
+    public void TestInsertMany(){
+
+        List<Document> documents = new ArrayList<Document>();
+        for (int i = 0; i<100; i++){
+            documents.add(new Document("i",i));
+        }
+
+        col.insertMany(documents);
+
+        FindIterable<Document>  findIterable = col.find();
+        MongoCursor<Document> mongoCursor = findIterable.iterator();
+        while (mongoCursor.hasNext()){
+            System.out.println(mongoCursor.next());
+        }
+
+    }
+
     //检索所有文档
     //MongoCollection   find()
     @Test
     public void TestFind(){
-        MongoClient mongoClient = new MongoClient("localhost",27017);
-        MongoDatabase db = mongoClient.getDatabase("foobar");
-        MongoCollection<Document> col = db.getCollection("myCollection");
 
         //检索所有文档
         /**
@@ -127,18 +103,41 @@ public class MongoDBCRUD {
         }
     }
 
+    //查找单个
+    @Test
+    public void TestFindOne(){
+        Document d = col.find().first();
+        System.out.println(d.toJson());
+    }
+
+    //查询具有过滤的单个文档
+    @Test
+    public void TestFindOneByCon(){
+        Document document = col.find(eq("i",71)).first();
+        System.out.println(document.toJson());
+    }
+
+    //查询具有过滤的多个文档
+    @Test
+    public void TestFindByCon(){
+        Block<Document> block = new Block<Document>() {
+            public void apply(Document document) {
+                System.out.println(document.toJson());
+            }
+        };
+        col.find(gt("i",50)).forEach(block);
+
+        col.find(and(gt("i", 50), lte("i", 100))).forEach(block);
+    }
+
     //更新文档
     //MongoCollection   update()
     @Test
     public void TestUpdate(){
-        MongoClient mongoClient = new MongoClient("localhost",27017);
-        MongoDatabase db = mongoClient.getDatabase("foobar");
-        MongoCollection<Document> col = db.getCollection("myCollection");
 
         //更新文档   将文档中likes=100的文档修改为likes=200
         //参数对应的值必须加双引号
-        UpdateResult re = col.updateMany(Filters.eq("likes", "200"), new Document("$set",new Document("likes","100")));
-
+        UpdateResult re = col.updateMany(eq("likes", "200"), new Document("$set",new Document("likes","100")));
 
         //检索查看结果
         FindIterable<Document> findIterable = col.find();
@@ -152,14 +151,11 @@ public class MongoDBCRUD {
     //MongoCollection   remove ()
     @Test
     public void TestDel(){
-        MongoClient mongoClient = new MongoClient("localhost",27017);
-        MongoDatabase db = mongoClient.getDatabase("foobar");
-        MongoCollection<Document> col = db.getCollection("myCollection");
 
         //删除符合条件的一个文档
-        //col.deleteOne(Filters.eq("likes","100"));
+        //col.deleteOne(eq("likes","100"));
         //删除符合条件的所有文档
-        col.deleteMany(Filters.eq("name","soli"));
+        col.deleteMany(eq("name","soli"));
 
         //检查结果
         FindIterable<Document> findIterable = col.find();
@@ -167,6 +163,41 @@ public class MongoDBCRUD {
         while (mongoCursor.hasNext()){
             System.out.println(mongoCursor.next());
         }
-
     }
+
+    //删除多个匹配文档
+    //MongoCollection   delete()
+    //filters  的正则，gte表示大于等于50
+    @Test
+    public void TestDelMany(){
+        DeleteResult deleteResult = col.deleteMany(gte("i",50));
+        System.out.println(deleteResult.getDeletedCount()+"-----------------");
+        FindIterable<Document> findIterable = col.find();
+        MongoCursor<Document> mongoCursor = findIterable.iterator();
+        while (mongoCursor.hasNext()){
+            System.out.println(mongoCursor.next());
+        }
+    }
+
+    //计数
+    @Test
+    public void TestCount(){
+        System.out.println(col.count());
+    }
+
+    //排序
+    //exists表示查找为i的元素
+    //sort中参数为 BasicDbObject
+    // -1代表倒序，1代表正序
+    @Test
+    public void TestSort(){
+//        FindIterable<Document> documents= col.find(exists("i")).sort(new BasicDBObject("i",-1));
+        FindIterable<Document> documents= col.find(exists("i")).sort(descending("i"));
+        MongoCursor<Document> mongoCursor  = documents.iterator();
+        while (mongoCursor.hasNext()){
+            System.out.println(mongoCursor.next());
+        }
+    }
+
+
 }
